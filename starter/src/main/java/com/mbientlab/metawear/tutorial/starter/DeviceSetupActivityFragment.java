@@ -51,7 +51,10 @@ import com.mbientlab.metawear.Route;
 import com.mbientlab.metawear.Subscriber;
 import com.mbientlab.metawear.android.BtleService;
 import com.mbientlab.metawear.builder.RouteBuilder;
+import com.mbientlab.metawear.builder.RouteComponent;
 import com.mbientlab.metawear.data.Acceleration;
+import com.mbientlab.metawear.data.EulerAngles;
+import com.mbientlab.metawear.module.SensorFusionBosch;
 
 import bolts.Continuation;
 import bolts.Task;
@@ -69,6 +72,7 @@ public class DeviceSetupActivityFragment extends Fragment implements ServiceConn
 
     public DeviceSetupActivityFragment() {
     }
+    final SensorFusionBosch sensorFusion = metawear.getModule(SensorFusionBosch.class);
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -81,6 +85,7 @@ public class DeviceSetupActivityFragment extends Fragment implements ServiceConn
 
         settings= (FragmentSettings) owner;
         owner.getApplicationContext().bindService(new Intent(owner, BtleService.class), this, Context.BIND_AUTO_CREATE);
+
     }
 
     @Override
@@ -97,11 +102,57 @@ public class DeviceSetupActivityFragment extends Fragment implements ServiceConn
         return inflater.inflate(R.layout.fragment_device_setup, container, false);
     }
 
+    @Override
+    public void onViewCreated(View view, Bundle savedInstanceState) {
+        super.onViewCreated(view, savedInstanceState);
+
+        view.findViewById(R.id.acc_start).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // stream eulerangles with sensor fusion
+                sensorFusion.eulerAngles().addRouteAsync(new RouteBuilder() {
+                    @Override
+                    public void configure(RouteComponent source) {
+                        source.stream(new Subscriber() {
+                            @Override
+                            public void apply(Data data, Object... env) {
+                                Log.i("MainActivity", "EulerAngles = " + data.value(EulerAngles.class));
+                            }
+                        });
+                    }
+                }).continueWith(new Continuation<Route, Void>() {
+                    @Override
+                    public Void then(Task<Route> task) throws Exception {
+                        sensorFusion.eulerAngles().start();
+                        sensorFusion.start();
+                        return null;
+                    }
+                });
+            }
+        });
+        view.findViewById(R.id.acc_stop).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                sensorFusion.stop();
+                sensorFusion.eulerAngles().stop();
+                metawear.tearDown();
+            }
+        });
+    }
+
+
 
 
     @Override
     public void onServiceConnected(ComponentName name, IBinder service) {
         metawear = ((BtleService.LocalBinder) service).getMetaWearBoard(settings.getBtDevice());
+
+        // use ndof mode with +/-16g acc range and 2000dps gyro range
+        sensorFusion.configure()
+                .mode(sensorFusion.Mode.NDOF)
+                .accRange(sensorFusion.AccRange.AR_16G)
+                .gyroRange(sensorFusion.GyroRange.GR_2000DPS)
+                .commit();
     }
 
     @Override
